@@ -1,11 +1,12 @@
 // npm start
 // quake 花蓮縣近海 24.03 121.65 17.5 5.7 4 50
+// quake 南投縣集集鎮 23.85 120.82 8.0 7.3 7 989
 const WebSocket = require("ws");
 const readline = require("readline");
 const sqlite3 = require("sqlite3").verbose(); // 引入 SQLite3
 
 const PORT = 8080;
-const HOST = "127.0.0.1";
+const HOST = "0.0.0.0";
 
 // ==========================================
 // 1. 資料庫初始化設定 (非同步)
@@ -175,7 +176,7 @@ wss.on("connection", (ws, req) => {
                     Number(data.latitude),
                     Number(data.longitude),
                     data.message || ""
-                ], function(err) {
+                ], function (err) {
                     if (err) {
                         console.error(`[DB Error] 寫入失敗: ${err.message}`);
                         ws.send(JSON.stringify({ type: "error", message: "資料庫寫入失敗" }));
