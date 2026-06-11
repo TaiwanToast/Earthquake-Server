@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>震望相助 - 災情回報地圖</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+        }
+
+        #map {
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .legend {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .dot {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="legend">
+        <b>狀態圖例</b><br>
+        <div><span class="dot" style="background: red;"></span> 需要協助 (Danger)</div>
+        <div><span class="dot" style="background: green;"></span> 安全 (Safe)</div>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        // 1. 初始化地圖，中心點設定在台灣中部 (南投集集附近)
+        // ✨ 加上 preferCanvas: true，強制使用硬體加速的 Canvas 渲染
+        const map = L.map('map', {
+            preferCanvas: true
+        }).setView([23.85, 120.82], 10);
+
+        // 使用 OpenStreetMap 圖資
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        // 儲存目前地圖上的標記，方便後續更新
+        const markers = {};
+
+        // 繪製或更新地圖上的點
+        // 繪製或更新地圖上的點 (Canvas 優化版)
+        function updateUserOnMap(user) {
+            const color = user.status === "danger" ? "red" : "green";
+            const userId = user.device_id || user.deviceId;
+
+            // 只先準備好資料，不提早生成 HTML 字串
+            const popupContent = `
+        <b>裝置 ID:</b> ${userId}<br>
+        <b>狀態:</b> ${user.status === "danger" ? "🚨 需要協助" : "✅ 安全"}<br>
+        <b>訊息:</b> ${user.message || "無"}<br>
+        <b>更新時間:</b> ${user.update_time || user.updateTime || "剛剛"}
+    `;
+
+            if (markers[userId]) {
+                // 更新現有點
+                const marker = markers[userId];
+                marker.setLatLng([user.latitude, user.longitude]);
+                marker.setStyle({ color: color, fillColor: color });
+                marker.getPopup().setContent(popupContent);
+            } else {
+                // 新增點：Canvas 模式下畫圓速度極快
+                const marker = L.circleMarker([user.latitude, user.longitude], {
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: 0.7,
+                    radius: 8,
+                    weight: 1 // 邊框變細一點，減少 Canvas 渲染負擔
+                }).addTo(map).bindPopup(popupContent);
+
+                markers[userId] = marker;
+            }
+        }
+
+        // 2. 連線到 WebSocket 伺服器
+        const ws = new WebSocket("ws://127.0.0.1:8080");
+        const TARGET_EARTHQUAKE_ID = "eq_19990921_014712"; // 剛剛 seed.js 寫入的 921 ID
+
+        ws.onopen = () => {
+            console.log("已連線到 WebSocket 伺服器");
+            // 連線成功後，主動向 Server 請求這場地震的地圖資料
+            ws.send(JSON.stringify({
+                type: "get_map_data",
+                earthquakeId: TARGET_EARTHQUAKE_ID
+            }));
+        };
+
+        ws.onmessage = (event) => {
+            const response = JSON.parse(event.data);
+
+            // 處理：初始化的整批地圖資料
+            if (response.type === "map_data_init") {
+                console.log("收到初始化地圖資料:", response.data);
+                response.data.forEach(user => updateUserOnMap(user));
+            }
+
+            // 處理：即時新增/更新的單筆回報 (有人剛剛透過 App 按下回報)
+            if (response.type === "map_update" && response.data.earthquakeId === TARGET_EARTHQUAKE_ID) {
+                console.log("收到即時狀態更新:", response.data);
+                updateUserOnMap(response.data);
+            }
+        };
+
+        ws.onerror = (error) => console.error("WebSocket 發生錯誤", error);
+        ws.onclose = () => console.log("WebSocket 連線已關閉");
+    </script>
+</body>
+
+</html>
